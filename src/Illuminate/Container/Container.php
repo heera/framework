@@ -489,12 +489,30 @@ class Container implements ArrayAccess {
 		// no binding registered for the abstractions so we need to bail out.
 		if ( ! $reflector->isInstantiable())
 		{
-			$message = "Target [$concrete] is not instantiable.";
+			// Before we throw the exception saying that, it's not instantiable we may check if we can find a
+			// a matching concrete class for the abstract type by following a nameing convention, so we can
+			// resolve the class automatically even without a binding. The naming convention for the interface
+			// and the concrete implementation (Repository class) is: "Interface" should be suffix for interface
+			// i.e. SomethingInterface and repository class should have "Repository" suffix, so we can replace the
+			// suffix "Interface" with "Repository" so we'll get "SomethingRepository" from "SomethingInterface"
+			// and we'll check if "SomethingRepository" class exists and if it does then we'll instantiate this.
+			
+			$concreteClass = substr($reflector->name, 0, strrpos($reflector->name, 'Interface')) . 'Repository';
 
-			throw new BindingResolutionException($message);
+			if(class_exists($concreteClass))
+			{
+				$reflector = new ReflectionClass($concreteClass);
+			}
+			else
+			{
+				$message = "Target [$concrete] is not instantiable.";
+				throw new BindingResolutionException($message);
+			}
+			$concrete = $concreteClass;
 		}
-
+		
 		$constructor = $reflector->getConstructor();
+		
 
 		// If there are no constructors, that means there are no dependencies then
 		// we can just resolve the instances of the objects right away, without
@@ -504,20 +522,16 @@ class Container implements ArrayAccess {
 			return new $concrete;
 		}
 
-		$dependencies = $constructor->getParameters();
+		$classes = $constructor->getParameters();
 
 		// Once we have all the constructor's parameters we can create each of the
 		// dependency instances and then use the reflection instances to make a
 		// new instance of this class, injecting the created dependencies in.
-		$parameters = $this->keyParametersByArgument(
-			$dependencies, $parameters
-		);
+		$deps = array_merge($parameters, $this->getDependencies(
+			array_diff_key($classes, $parameters)
+		));
 
-		$instances = $this->getDependencies(
-			$dependencies, $parameters
-		);
-
-		return $reflector->newInstanceArgs($instances);
+		return $reflector->newInstanceArgs($deps);
 	}
 
 	/**
